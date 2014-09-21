@@ -85,7 +85,7 @@ if Backbone?
       scrollTop = $(window).scrollTop();
       windowHeight = $(window).height();
 
-      discussionBody = $(".discussion-column")
+      discussionBody = $(".forum-content")
       discussionsBodyTop = if discussionBody[0] then discussionBody.offset().top
       discussionsBodyBottom = discussionsBodyTop + discussionBody.outerHeight()
 
@@ -242,7 +242,7 @@ if Backbone?
 
     goHome: ->
       @template = _.template($("#discussion-home").html())
-      $(".discussion-column").html(@template)
+      $(".forum-content").html(@template)
       $(".forum-nav-thread-list a").removeClass("is-active")
       $("input.email-setting").bind "click", @updateEmailNotifications
       url = DiscussionUtil.urlFor("notifications_status",window.user.get("id"))
