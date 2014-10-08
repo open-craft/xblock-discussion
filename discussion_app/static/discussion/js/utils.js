@@ -22,41 +22,48 @@
   this.DiscussionUtil = (function() {
     function DiscussionUtil() {}
 
-    DiscussionUtil.baseUrl = '';
-
     DiscussionUtil.wmdEditors = {};
-
-    DiscussionUtil.setBaseUrl = function(baseUrl) {
-      return this.baseUrl = baseUrl;
-    };
 
     DiscussionUtil.getTemplate = function(id) {
       return $("script#" + id).html();
+    };
+
+    DiscussionUtil.setUser = function(user) {
+      return this.user = user;
+    };
+
+    DiscussionUtil.getUser = function() {
+      return this.user;
     };
 
     DiscussionUtil.loadRoles = function(roles) {
       return this.roleIds = roles;
     };
 
-    DiscussionUtil.loadFlagModerator = function(what) {
-      return this.isFlagModerator = (what === "True") || (what === 1);
-    };
-
     DiscussionUtil.loadRolesFromContainer = function() {
-      this.loadRoles($("#discussion-container").data("roles"));
-      return this.loadFlagModerator($("#discussion-container").data("flag-moderator"));
+      return this.loadRoles($("#discussion-container").data("roles"));
     };
 
     DiscussionUtil.isStaff = function(user_id) {
-      var staff;
+      var staff, _ref;
+      if (user_id == null) {
+        user_id = (_ref = this.user) != null ? _ref.id : void 0;
+      }
       staff = _.union(this.roleIds['Moderator'], this.roleIds['Administrator']);
       return _.include(staff, parseInt(user_id));
     };
 
     DiscussionUtil.isTA = function(user_id) {
-      var ta;
+      var ta, _ref;
+      if (user_id == null) {
+        user_id = (_ref = this.user) != null ? _ref.id : void 0;
+      }
       ta = _.union(this.roleIds['Community TA']);
       return _.include(ta, parseInt(user_id));
+    };
+
+    DiscussionUtil.isPrivilegedUser = function(user_id) {
+      return this.isStaff(user_id) || this.isTA(user_id);
     };
 
     DiscussionUtil.bulkUpdateContentInfo = function(infos) {
@@ -76,8 +83,7 @@
     };
 
     DiscussionUtil.urlFor = function(name, param, param1, param2) {
-      var urls;
-      urls = {
+      return {
         follow_discussion: "/courses/" + $$course_id + "/discussion/" + param + "/follow",
         unfollow_discussion: "/courses/" + $$course_id + "/discussion/" + param + "/unfollow",
         create_thread: "/courses/" + $$course_id + "/discussion/" + param + "/threads/create",
@@ -103,6 +109,7 @@
         downvote_comment: "/courses/" + $$course_id + "/discussion/comments/" + param + "/downvote",
         undo_vote_for_comment: "/courses/" + $$course_id + "/discussion/comments/" + param + "/unvote",
         upload: "/courses/" + $$course_id + "/discussion/upload",
+        users: "/courses/" + $$course_id + "/discussion/users",
         search: "/courses/" + $$course_id + "/discussion/forum/search",
         retrieve_discussion: "/courses/" + $$course_id + "/discussion/forum/" + param + "/inline",
         retrieve_single_thread: "/courses/" + $$course_id + "/discussion/forum/" + param + "/threads/" + param1,
@@ -115,8 +122,13 @@
         "enable_notifications": "/notification_prefs/enable/",
         "disable_notifications": "/notification_prefs/disable/",
         "notifications_status": "/notification_prefs/status/"
-      };
-      return this.baseUrl + urls[name];
+      }[name];
+    };
+
+    DiscussionUtil.ignoreEnterKey = function(event) {
+      if (event.which === 13) {
+        return event.preventDefault();
+      }
     };
 
     DiscussionUtil.activateOnSpace = function(event, func) {
@@ -155,7 +167,7 @@
     };
 
     DiscussionUtil.safeAjax = function(params) {
-      var $elem, beforeSend, errorCallback, request,
+      var $elem, request,
         _this = this;
       $elem = params.$elem;
       if ($elem && $elem.attr("disabled")) {
@@ -164,7 +176,7 @@
       params["url"] = URI(params["url"]).addSearch({
         ajax: 1
       });
-      beforeSend = function() {
+      params["beforeSend"] = function() {
         if ($elem) {
           $elem.attr("disabled", "disabled");
         }
@@ -176,15 +188,11 @@
           }
         }
       };
-      errorCallback = params['error'] ? params['error'] : function() {
-        return _this.discussionAlert(gettext("Sorry"), gettext("We had some trouble processing your request. Please ensure you have copied any unsaved work and then reload the page."));
-      };
-      params['error'] = function(xhr, textStatus, errorThrown) {
-        if (textStatus !== 'abort') {
-          return errorCallback(xhr, textStatus, errorThrown);
-        }
-      };
-      beforeSend();
+      if (!params["error"]) {
+        params["error"] = function() {
+          return _this.discussionAlert(gettext("Sorry"), gettext("We had some trouble processing your request. Please ensure you have copied any unsaved work and then reload the page."));
+        };
+      }
       request = $.ajax(params).always(function() {
         if ($elem) {
           $elem.removeAttr("disabled");
@@ -198,6 +206,21 @@
         }
       });
       return request;
+    };
+
+    DiscussionUtil.updateWithUndo = function(model, updates, safeAjaxParams, errorMsg) {
+      var undo,
+        _this = this;
+      if (errorMsg) {
+        safeAjaxParams.error = function() {
+          return _this.discussionAlert(gettext("Sorry"), errorMsg);
+        };
+      }
+      undo = _.pick(model.attributes, _.keys(updates));
+      model.set(updates);
+      return this.safeAjax(safeAjaxParams).fail(function() {
+        return model.set(undo);
+      });
     };
 
     DiscussionUtil.bindLocalEvents = function($local, eventsHandler) {
@@ -215,7 +238,7 @@
       return function(xhr, textStatus, error) {
         var makeErrorElem, response, _i, _len, _ref, _results;
         makeErrorElem = function(message) {
-          return $("<li>").addClass("new-post-form-error").html(message);
+          return $("<li>").addClass("post-error").html(message);
         };
         errorsField.empty().show();
         if (xhr.status === 400) {
@@ -379,6 +402,22 @@
         }
         return text.substr(0, minLength) + gettext('…');
       }
+    };
+
+    DiscussionUtil.abbreviateHTML = function(html, minLength) {
+      var $result, imagesToReplace, truncated_text;
+      truncated_text = jQuery.truncate(html, {
+        length: minLength,
+        noBreaks: true,
+        ellipsis: gettext('…')
+      });
+      $result = $("<div>" + truncated_text + "</div>");
+      imagesToReplace = $result.find("img:not(:first)");
+      if (imagesToReplace.length > 0) {
+        $result.append("<p><em>Some images in this post have been omitted</em></p>");
+      }
+      imagesToReplace.replaceWith("<em>image omitted</em>");
+      return $result.html();
     };
 
     DiscussionUtil.getPaginationParams = function(curPage, numPages, pageUrlFunc) {

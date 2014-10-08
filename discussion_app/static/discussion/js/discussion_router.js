@@ -27,25 +27,29 @@
       DiscussionRouter.prototype.initialize = function(options) {
         var _this = this;
         this.discussion = options['discussion'];
+        this.course_settings = options['course_settings'];
         this.nav = new DiscussionThreadListView({
           collection: this.discussion,
-          el: $(".sidebar")
+          el: $(".forum-nav")
         });
         this.nav.on("thread:selected", this.navigateToThread);
         this.nav.on("thread:removed", this.navigateToAllThreads);
         this.nav.on("threads:rendered", this.setActiveThread);
-        this.nav.render();
-        this.newPostView = new NewPostView({
-          el: $(".new-post-article"),
-          collection: this.discussion
-        });
         this.nav.on("thread:created", this.navigateToThread);
+        this.nav.render();
         this.newPost = $('.new-post-article');
+        this.newPostView = new NewPostView({
+          el: this.newPost,
+          collection: this.discussion,
+          course_settings: this.course_settings,
+          mode: "tab"
+        });
+        this.newPostView.render();
         $('.new-post-btn').bind("click", this.showNewPost);
         $('.new-post-btn').bind("keydown", function(event) {
           return DiscussionUtil.activateOnSpace(event, _this.showNewPost);
         });
-        return $('.new-post-cancel').bind("click", this.hideNewPost);
+        return this.newPostView.$('.cancel').bind("click", this.hideNewPost);
       };
 
       DiscussionRouter.prototype.allThreads = function() {
@@ -62,23 +66,8 @@
       };
 
       DiscussionRouter.prototype.showThread = function(forum_name, thread_id) {
-        var callback,
-          _this = this;
-        this.thread = this.discussion.get(thread_id);
-        if (!this.thread) {
-          callback = function(thread) {
-            _this.thread = thread;
-            _this.discussion.reset(_this.discussion.models.concat(thread));
-            return _this.renderThreadView();
-          };
-          return this.retrieveSingleThread(forum_name, thread_id, callback);
-        } else {
-          return this.renderThreadView();
-        }
-      };
-
-      DiscussionRouter.prototype.renderThreadView = function() {
         var _this = this;
+        this.thread = this.discussion.get(thread_id);
         this.thread.set("unread_comments_count", 0);
         this.thread.set("read", true);
         this.setActiveThread();
@@ -86,9 +75,16 @@
           this.main.cleanup();
           this.main.undelegateEvents();
         }
+        if (!($(".forum-content").is(":visible"))) {
+          $(".forum-content").fadeIn();
+        }
+        if (this.newPost.is(":visible")) {
+          this.newPost.fadeOut();
+        }
         this.main = new DiscussionThreadView({
-          el: $(".discussion-column"),
-          model: this.thread
+          el: $(".forum-content"),
+          model: this.thread,
+          mode: "tab"
         });
         this.main.render();
         return this.main.on("thread:responses:rendered", function() {
@@ -111,28 +107,22 @@
       };
 
       DiscussionRouter.prototype.showNewPost = function(event) {
-        this.newPost.slideDown(300);
-        return $('.new-post-title').focus();
+        var _this = this;
+        return $('.forum-content').fadeOut({
+          duration: 200,
+          complete: function() {
+            _this.newPost.fadeIn(200);
+            return $('.new-post-title').focus();
+          }
+        });
       };
 
       DiscussionRouter.prototype.hideNewPost = function(event) {
-        return this.newPost.slideUp(300);
-      };
-
-      DiscussionRouter.prototype.retrieveSingleThread = function(forum_name, thread_id, callback) {
         var _this = this;
-        return DiscussionUtil.safeAjax({
-          url: DiscussionUtil.urlFor('retrieve_single_thread', forum_name, thread_id),
-          success: function(data, textStatus, xhr) {
-            return callback(new Thread(data['content']));
-          },
-          error: function(xhr) {
-            if (xhr.status === 404) {
-              DiscussionUtil.discussionAlert(gettext("Sorry"), gettext("The thread you selected has been deleted. Please select another thread."));
-            } else {
-              DiscussionUtil.discussionAlert(gettext("Sorry"), gettext("We had some trouble loading more responses. Please try again."));
-            }
-            return _this.allThreads();
+        return this.newPost.fadeOut({
+          duration: 200,
+          complete: function() {
+            return $('.forum-content').fadeIn(200);
           }
         });
       };

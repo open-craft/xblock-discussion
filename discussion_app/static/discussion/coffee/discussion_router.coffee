@@ -6,18 +6,26 @@ if Backbone?
 
     initialize: (options) ->
         @discussion = options['discussion']
-        @nav = new DiscussionThreadListView(collection: @discussion, el: $(".sidebar"))
+        @course_settings = options['course_settings']
+
+        @nav = new DiscussionThreadListView(collection: @discussion, el: $(".forum-nav"))
         @nav.on "thread:selected", @navigateToThread
         @nav.on "thread:removed", @navigateToAllThreads
         @nav.on "threads:rendered", @setActiveThread
+        @nav.on "thread:created", @navigateToThread
         @nav.render()
 
-        @newPostView = new NewPostView(el: $(".new-post-article"), collection: @discussion)
-        @nav.on "thread:created", @navigateToThread
         @newPost = $('.new-post-article')
+        @newPostView = new NewPostView(
+          el: @newPost,
+          collection: @discussion,
+          course_settings: @course_settings,
+          mode: "tab"
+        )
+        @newPostView.render()
         $('.new-post-btn').bind "click", @showNewPost
         $('.new-post-btn').bind "keydown", (event) => DiscussionUtil.activateOnSpace(event, @showNewPost)
-        $('.new-post-cancel').bind "click", @hideNewPost
+        @newPostView.$('.cancel').bind "click", @hideNewPost
 
     allThreads: ->
       @nav.updateSidebar()
@@ -31,26 +39,18 @@ if Backbone?
 
     showThread: (forum_name, thread_id) ->
       @thread = @discussion.get(thread_id)
-      if !@thread
-        callback = (thread) =>
-          @thread = thread
-          # @discussion.add is reserved for new threads that the user creates,
-          # so we need to use @discussion.reset here.
-          @discussion.reset(@discussion.models.concat(thread))
-          @renderThreadView()
-        @retrieveSingleThread(forum_name, thread_id, callback)
-      else
-        @renderThreadView()
-
-    renderThreadView: () ->
       @thread.set("unread_comments_count", 0)
       @thread.set("read", true)
       @setActiveThread()
       if(@main)
         @main.cleanup()
         @main.undelegateEvents()
+      unless($(".forum-content").is(":visible"))
+        $(".forum-content").fadeIn()
+      if(@newPost.is(":visible"))
+        @newPost.fadeOut()
 
-      @main = new DiscussionThreadView(el: $(".discussion-column"), model: @thread)
+      @main = new DiscussionThreadView(el: $(".forum-content"), model: @thread, mode: "tab")
       @main.render()
       @main.on "thread:responses:rendered", =>
         @nav.updateSidebar()
@@ -63,26 +63,17 @@ if Backbone?
       @navigate("", trigger: true)
 
     showNewPost: (event) =>
-      @newPost.slideDown(300)
-      $('.new-post-title').focus()
+      $('.forum-content').fadeOut(
+        duration: 200
+        complete: =>
+          @newPost.fadeIn(200)
+          $('.new-post-title').focus()
+      )
 
     hideNewPost: (event) =>
-      @newPost.slideUp(300)
+      @newPost.fadeOut(
+        duration: 200
+        complete: =>
+          $('.forum-content').fadeIn(200)
+      )
 
-    retrieveSingleThread: (forum_name, thread_id, callback) ->
-      DiscussionUtil.safeAjax
-        url: DiscussionUtil.urlFor('retrieve_single_thread', forum_name, thread_id)
-        success: (data, textStatus, xhr) =>
-          callback(new Thread(data['content']))
-        error: (xhr) =>
-          if xhr.status == 404
-            DiscussionUtil.discussionAlert(
-              gettext("Sorry"),
-              gettext("The thread you selected has been deleted. Please select another thread.")
-            )
-          else
-            DiscussionUtil.discussionAlert(
-              gettext("Sorry"),
-              gettext("We had some trouble loading more responses. Please try again.")
-            )
-          @allThreads()

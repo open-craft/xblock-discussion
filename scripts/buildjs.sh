@@ -24,6 +24,7 @@ JS_FILES=(
     # Discussion
     'discussion_app/static/discussion/js/tooltip_manager.js'
     'discussion_app/static/discussion/js/models/discussion_user.js'
+    'discussion_app/static/discussion/js/models/discussion_course_settings.js'
     'discussion_app/static/discussion/js/content.js'
     'discussion_app/static/discussion/js/discussion.js'
     'discussion_app/static/discussion/js/main.js'

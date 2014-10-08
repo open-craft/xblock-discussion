@@ -15,33 +15,147 @@
         return _ref;
       }
 
-      NewPostView.prototype.initialize = function() {
-        this.dropdownButton = this.$(".topic_dropdown_button");
-        this.topicMenu = this.$(".topic_menu_wrapper");
-        this.menuOpen = this.dropdownButton.hasClass('dropped');
-        this.topicId = this.$(".topic").first().data("discussion_id");
-        this.topicText = this.getFullTopicName(this.$(".topic").first());
+      NewPostView.prototype.initialize = function(options) {
+        var _ref1;
+        this.mode = options.mode || "inline";
+        if ((_ref1 = this.mode) !== "tab" && _ref1 !== "inline") {
+          throw new Error("invalid mode: " + this.mode);
+        }
+        this.course_settings = options.course_settings;
         this.maxNameWidth = 100;
-        this.setSelectedTopic();
-        DiscussionUtil.makeWmdEditor(this.$el, $.proxy(this.$, this), "new-post-body");
-        if (this.$($(".topic_menu li a")[0]).attr('cohorted') !== "True") {
-          return $('.choose-cohort').hide();
+        return this.topicId = options.topicId;
+      };
+
+      NewPostView.prototype.render = function() {
+        var context;
+        context = _.clone(this.course_settings.attributes);
+        _.extend(context, {
+          cohort_options: this.getCohortOptions(),
+          mode: this.mode,
+          form_id: this.mode + (this.topicId ? "-" + this.topicId : "")
+        });
+        if (this.mode === "tab") {
+          context.topics_html = this.renderCategoryMap(this.course_settings.get("category_map"));
+        }
+        this.$el.html(_.template($("#new-post-template").html(), context));
+        if (this.mode === "tab") {
+          this.dropdownButton = this.$(".post-topic-button");
+          this.topicMenu = this.$(".topic-menu-wrapper");
+          this.hideTopicDropdown();
+          this.setTopic(this.$("a.topic-title").first());
+        }
+        return DiscussionUtil.makeWmdEditor(this.$el, $.proxy(this.$, this), "js-post-body");
+      };
+
+      NewPostView.prototype.renderCategoryMap = function(map) {
+        var category_template, entry, entry_template, html, name, _i, _len, _ref1;
+        category_template = _.template($("#new-post-menu-category-template").html());
+        entry_template = _.template($("#new-post-menu-entry-template").html());
+        html = "";
+        _ref1 = map.children;
+        for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
+          name = _ref1[_i];
+          if (name in map.entries) {
+            entry = map.entries[name];
+            html += entry_template({
+              text: name,
+              id: entry.id,
+              is_cohorted: entry.is_cohorted
+            });
+          } else {
+            html += category_template({
+              text: name,
+              entries: this.renderCategoryMap(map.subcategories[name])
+            });
+          }
+        }
+        return html;
+      };
+
+      NewPostView.prototype.getCohortOptions = function() {
+        var user_cohort_id;
+        if (this.course_settings.get("is_cohorted") && DiscussionUtil.isStaff()) {
+          user_cohort_id = $("#discussion-container").data("user-cohort-id");
+          return _.map(this.course_settings.get("cohorts"), function(cohort) {
+            return {
+              value: cohort.id,
+              text: cohort.name,
+              selected: cohort.id === user_cohort_id
+            };
+          });
+        } else {
+          return null;
         }
       };
 
       NewPostView.prototype.events = {
-        "submit .new-post-form": "createPost",
-        "click  .topic_dropdown_button": "toggleTopicDropdown",
-        "click  .topic_menu_wrapper": "setTopic",
-        "click  .topic_menu_search": "ignoreClick",
-        "keyup .form-topic-drop-search-input": DiscussionFilter.filterDrop
+        "submit .forum-new-post-form": "createPost",
+        "click .post-topic-button": "toggleTopicDropdown",
+        "click .topic-menu-wrapper": "handleTopicEvent",
+        "click .topic-filter-label": "ignoreClick",
+        "keyup .topic-filter-input": DiscussionFilter.filterDrop,
+        "change .post-option-input": "postOptionChange"
       };
 
       NewPostView.prototype.ignoreClick = function(event) {
         return event.stopPropagation();
       };
 
+      NewPostView.prototype.postOptionChange = function(event) {
+        var $optionElem, $target;
+        $target = $(event.target);
+        $optionElem = $target.closest(".post-option");
+        if ($target.is(":checked")) {
+          return $optionElem.addClass("is-enabled");
+        } else {
+          return $optionElem.removeClass("is-enabled");
+        }
+      };
+
+      NewPostView.prototype.createPost = function(event) {
+        var anonymous, anonymous_to_peers, body, follow, group, thread_type, title, url,
+          _this = this;
+        event.preventDefault();
+        thread_type = this.$(".post-type-input:checked").val();
+        title = this.$(".js-post-title").val();
+        body = this.$(".js-post-body").find(".wmd-input").val();
+        group = this.$(".js-group-select option:selected").attr("value");
+        anonymous = false || this.$(".js-anon").is(":checked");
+        anonymous_to_peers = false || this.$(".js-anon-peers").is(":checked");
+        follow = false || this.$(".js-follow").is(":checked");
+        url = DiscussionUtil.urlFor('create_thread', this.topicId);
+        return DiscussionUtil.safeAjax({
+          $elem: $(event.target),
+          $loading: event ? $(event.target) : void 0,
+          url: url,
+          type: "POST",
+          dataType: 'json',
+          async: false,
+          data: {
+            thread_type: thread_type,
+            title: title,
+            body: body,
+            anonymous: anonymous,
+            anonymous_to_peers: anonymous_to_peers,
+            auto_subscribe: follow,
+            group_id: group
+          },
+          error: DiscussionUtil.formErrorHandler(this.$(".post-errors")),
+          success: function(response, textStatus) {
+            var thread;
+            thread = new Thread(response['content']);
+            DiscussionUtil.clearFormErrors(_this.$(".post-errors"));
+            _this.$el.hide();
+            _this.$(".js-post-title").val("").attr("prev-text", "");
+            _this.$(".js-post-body textarea").val("").attr("prev-text", "");
+            _this.$(".wmd-preview p").html("");
+            return _this.collection.add(thread);
+          }
+        });
+      };
+
       NewPostView.prototype.toggleTopicDropdown = function(event) {
+        event.preventDefault();
         event.stopPropagation();
         if (this.menuOpen) {
           return this.hideTopicDropdown();
@@ -55,44 +169,48 @@
         this.dropdownButton.addClass('dropped');
         this.topicMenu.show();
         $(".form-topic-drop-search-input").focus();
-        $("body").bind("keydown", this.setActiveItem);
         $("body").bind("click", this.hideTopicDropdown);
-        return this.maxNameWidth = this.dropdownButton.width() * 0.9;
+        return this.maxNameWidth = this.dropdownButton.width() - 40;
       };
 
       NewPostView.prototype.hideTopicDropdown = function() {
         this.menuOpen = false;
         this.dropdownButton.removeClass('dropped');
         this.topicMenu.hide();
-        $("body").unbind("keydown", this.setActiveItem);
         return $("body").unbind("click", this.hideTopicDropdown);
       };
 
-      NewPostView.prototype.setTopic = function(event) {
-        var $target;
-        $target = $(event.target);
-        if ($target.data('discussion_id')) {
+      NewPostView.prototype.handleTopicEvent = function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        return this.setTopic($(event.target));
+      };
+
+      NewPostView.prototype.setTopic = function($target) {
+        if ($target.data('discussion-id')) {
           this.topicText = $target.html();
           this.topicText = this.getFullTopicName($target);
-          this.topicId = $target.data('discussion_id');
+          this.topicId = $target.data('discussion-id');
           this.setSelectedTopic();
-          if ($target.attr('cohorted') === "True") {
-            return $('.choose-cohort').show();
+          if ($target.data("cohorted")) {
+            $(".js-group-select").prop("disabled", false);
           } else {
-            return $('.choose-cohort').hide();
+            $(".js-group-select").val("");
+            $(".js-group-select").prop("disabled", true);
           }
+          return this.hideTopicDropdown();
         }
       };
 
       NewPostView.prototype.setSelectedTopic = function() {
-        return this.dropdownButton.html(this.fitName(this.topicText) + ' <span class="drop-arrow">▾</span>');
+        return this.$(".js-selected-topic").html(this.fitName(this.topicText));
       };
 
       NewPostView.prototype.getFullTopicName = function(topicElement) {
         var name;
         name = topicElement.html();
-        topicElement.parents('ul').not('.topic_menu').each(function() {
-          return name = $(this).siblings('a').html() + ' / ' + name;
+        topicElement.parents('.topic-submenu').each(function() {
+          return name = $(this).siblings('.topic-title').text() + ' / ' + name;
         });
         return name;
       };
@@ -144,74 +262,6 @@
           name = gettext("…") + " / " + rawName + " " + gettext("…");
         }
         return name;
-      };
-
-      NewPostView.prototype.createPost = function(event) {
-        var anonymous, anonymous_to_peers, body, follow, group, title, url,
-          _this = this;
-        event.preventDefault();
-        title = this.$(".new-post-title").val();
-        body = this.$(".new-post-body").find(".wmd-input").val();
-        group = this.$(".new-post-group option:selected").attr("value");
-        anonymous = false || this.$("input.discussion-anonymous").is(":checked");
-        anonymous_to_peers = false || this.$("input.discussion-anonymous-to-peers").is(":checked");
-        follow = false || this.$("input.discussion-follow").is(":checked");
-        url = DiscussionUtil.urlFor('create_thread', this.topicId);
-        return DiscussionUtil.safeAjax({
-          $elem: $(event.target),
-          $loading: event ? $(event.target) : void 0,
-          url: url,
-          type: "POST",
-          dataType: 'json',
-          async: true,
-          data: {
-            title: title,
-            body: body,
-            anonymous: anonymous,
-            anonymous_to_peers: anonymous_to_peers,
-            auto_subscribe: follow,
-            group_id: group
-          },
-          error: DiscussionUtil.formErrorHandler(this.$(".new-post-form-errors")),
-          success: function(response, textStatus) {
-            var thread;
-            thread = new Thread(response['content']);
-            DiscussionUtil.clearFormErrors(_this.$(".new-post-form-errors"));
-            _this.$el.hide();
-            _this.$(".new-post-title").val("").attr("prev-text", "");
-            _this.$(".new-post-body textarea").val("").attr("prev-text", "");
-            _this.$(".wmd-preview p").html("");
-            return _this.collection.add(thread);
-          }
-        });
-      };
-
-      NewPostView.prototype.setActiveItem = function(event) {
-        var index, itemFromTop, itemTop, items, scrollTarget, scrollTop;
-        if (event.which === 13) {
-          $(".topic_menu_wrapper .focused").click();
-          return;
-        }
-        if (event.which !== 40 && event.which !== 38) {
-          return;
-        }
-        event.preventDefault();
-        items = $.makeArray($(".topic_menu_wrapper a").not(".hidden"));
-        index = items.indexOf($('.topic_menu_wrapper .focused')[0]);
-        if (event.which === 40) {
-          index = Math.min(index + 1, items.length - 1);
-        }
-        if (event.which === 38) {
-          index = Math.max(index - 1, 0);
-        }
-        $(".topic_menu_wrapper .focused").removeClass("focused");
-        $(items[index]).addClass("focused");
-        itemTop = $(items[index]).parent().offset().top;
-        scrollTop = $(".topic_menu").scrollTop();
-        itemFromTop = $(".topic_menu").offset().top - itemTop;
-        scrollTarget = Math.min(scrollTop - itemFromTop, scrollTop);
-        scrollTarget = Math.max(scrollTop - itemFromTop - $(".topic_menu").height() + $(items[index]).height() + 20, scrollTarget);
-        return $(".topic_menu").scrollTop(scrollTarget);
       };
 
       return NewPostView;

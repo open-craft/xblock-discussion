@@ -2,7 +2,9 @@
 (function() {
   var _ref, _ref1, _ref2, _ref3,
     __hasProp = {}.hasOwnProperty,
-    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
+    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; },
+    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
+    __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
 
   if (typeof Backbone !== "undefined" && Backbone !== null) {
     this.Content = (function(_super) {
@@ -24,7 +26,6 @@
       Content.prototype.actions = {
         editable: '.admin-edit',
         can_reply: '.discussion-reply',
-        can_endorse: '.admin-endorse',
         can_delete: '.admin-delete',
         can_openclose: '.admin-openclose'
       };
@@ -37,6 +38,10 @@
 
       Content.prototype.can = function(action) {
         return (this.get('ability') || {})[action];
+      };
+
+      Content.prototype.canBeEndorsed = function() {
+        return false;
       };
 
       Content.prototype.updateInfo = function(info) {
@@ -88,11 +93,20 @@
       };
 
       Content.prototype.initialize = function() {
+        var userId;
         Content.addContent(this.id, this);
+        userId = this.get('user_id');
+        if (userId != null) {
+          this.set('staff_authored', DiscussionUtil.isStaff(userId));
+          this.set('community_ta_authored', DiscussionUtil.isTA(userId));
+        } else {
+          this.set('staff_authored', false);
+          this.set('community_ta_authored', false);
+        }
         if (Content.getInfo(this.id)) {
           this.updateInfo(Content.getInfo(this.id));
         }
-        this.set('user_url', DiscussionUtil.urlFor('user_profile', this.get('user_id')));
+        this.set('user_url', DiscussionUtil.urlFor('user_profile', userId));
         return this.resetComments(this.get('children'));
       };
 
@@ -155,14 +169,26 @@
         return this.trigger("change", this);
       };
 
+      Content.prototype.isFlagged = function() {
+        var flaggers, user, _ref1;
+        user = DiscussionUtil.getUser();
+        flaggers = this.get("abuse_flaggers");
+        return user && ((_ref1 = user.id, __indexOf.call(flaggers, _ref1) >= 0) || (DiscussionUtil.isPrivilegedUser(user.id) && flaggers.length > 0));
+      };
+
+      Content.prototype.incrementVote = function(increment) {
+        var newVotes;
+        newVotes = _.clone(this.get("votes"));
+        newVotes.up_count = newVotes.up_count + increment;
+        return this.set("votes", newVotes);
+      };
+
       Content.prototype.vote = function() {
-        this.get("votes")["up_count"] = parseInt(this.get("votes")["up_count"]) + 1;
-        return this.trigger("change", this);
+        return this.incrementVote(1);
       };
 
       Content.prototype.unvote = function() {
-        this.get("votes")["up_count"] = parseInt(this.get("votes")["up_count"]) - 1;
-        return this.trigger("change", this);
+        return this.incrementVote(-1);
       };
 
       return Content;
@@ -282,6 +308,7 @@
       __extends(Comment, _super);
 
       function Comment() {
+        this.canBeEndorsed = __bind(this.canBeEndorsed, this);
         _ref2 = Comment.__super__.constructor.apply(this, arguments);
         return _ref2;
       }
@@ -323,6 +350,12 @@
           return count += comment.getCommentsCount() + 1;
         });
         return count;
+      };
+
+      Comment.prototype.canBeEndorsed = function() {
+        var user_id;
+        user_id = window.user.get("id");
+        return user_id && (DiscussionUtil.isPrivilegedUser(user_id) || (this.get('thread').get('thread_type') === 'question' && this.get('thread').get('user_id') === user_id));
       };
 
       return Comment;

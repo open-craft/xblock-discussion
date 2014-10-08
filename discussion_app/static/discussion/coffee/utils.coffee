@@ -12,33 +12,36 @@ $ ->
       @$_loading.remove()
 
 class @DiscussionUtil
-  @baseUrl: ''
 
   @wmdEditors: {}
-
-  @setBaseUrl: (baseUrl) ->
-    @baseUrl = baseUrl
 
   @getTemplate: (id) ->
     $("script##{id}").html()
 
+  @setUser: (user) ->
+    @user = user
+
+  @getUser: () ->
+    @user
+
   @loadRoles: (roles)->
     @roleIds = roles
 
-  @loadFlagModerator: (what)->
-    @isFlagModerator = ((what=="True") or (what == 1))
-
   @loadRolesFromContainer: ->
     @loadRoles($("#discussion-container").data("roles"))
-    @loadFlagModerator($("#discussion-container").data("flag-moderator"))
 
   @isStaff: (user_id) ->
+    user_id ?= @user?.id
     staff = _.union(@roleIds['Moderator'], @roleIds['Administrator'])
     _.include(staff, parseInt(user_id))
 
   @isTA: (user_id) ->
+    user_id ?= @user?.id
     ta = _.union(@roleIds['Community TA'])
     _.include(ta, parseInt(user_id))
+
+  @isPrivilegedUser: (user_id) ->
+    @isStaff(user_id) || @isTA(user_id)
 
   @bulkUpdateContentInfo: (infos) ->
     for id, info of infos
@@ -51,7 +54,7 @@ class @DiscussionUtil
             .click -> handler(this)
 
   @urlFor: (name, param, param1, param2) ->
-    urls = {
+    {
       follow_discussion       : "/courses/#{$$course_id}/discussion/#{param}/follow"
       unfollow_discussion     : "/courses/#{$$course_id}/discussion/#{param}/unfollow"
       create_thread           : "/courses/#{$$course_id}/discussion/#{param}/threads/create"
@@ -77,6 +80,7 @@ class @DiscussionUtil
       downvote_comment        : "/courses/#{$$course_id}/discussion/comments/#{param}/downvote"
       undo_vote_for_comment   : "/courses/#{$$course_id}/discussion/comments/#{param}/unvote"
       upload                  : "/courses/#{$$course_id}/discussion/upload"
+      users                   : "/courses/#{$$course_id}/discussion/users"
       search                  : "/courses/#{$$course_id}/discussion/forum/search"
       retrieve_discussion     : "/courses/#{$$course_id}/discussion/forum/#{param}/inline"
       retrieve_single_thread  : "/courses/#{$$course_id}/discussion/forum/#{param}/threads/#{param1}"
@@ -89,9 +93,11 @@ class @DiscussionUtil
       "enable_notifications"  : "/notification_prefs/enable/"
       "disable_notifications" : "/notification_prefs/disable/"
       "notifications_status" : "/notification_prefs/status/"
-    }
+    }[name]
 
-    @baseUrl + urls[name]
+  @ignoreEnterKey: (event) =>
+    if event.which == 13
+      event.preventDefault()
 
   @activateOnSpace: (event, func) ->
     if event.which == 32
@@ -131,7 +137,7 @@ class @DiscussionUtil
     if $elem and $elem.attr("disabled")
       return
     params["url"] = URI(params["url"]).addSearch ajax: 1
-    beforeSend = ->
+    params["beforeSend"] = ->
       if $elem
         $elem.attr("disabled", "disabled")
       if params["$loading"]
@@ -139,15 +145,12 @@ class @DiscussionUtil
           params["loadingCallback"].apply(params["$loading"])
         else
           params["$loading"].loading(params["takeFocus"])
-    errorCallback = if params['error'] then params['error'] else =>
+    if !params["error"]
+      params["error"] = =>
         @discussionAlert(
           gettext("Sorry"),
           gettext("We had some trouble processing your request. Please ensure you have copied any unsaved work and then reload the page.")
         )
-    params['error'] = (xhr, textStatus, errorThrown) =>
-      if textStatus != 'abort'
-        errorCallback(xhr, textStatus, errorThrown)
-    beforeSend()
     request = $.ajax(params).always ->
       if $elem
         $elem.removeAttr("disabled")
@@ -158,6 +161,13 @@ class @DiscussionUtil
           params["$loading"].loaded()
     return request
 
+  @updateWithUndo: (model, updates, safeAjaxParams, errorMsg) ->
+    if errorMsg
+      safeAjaxParams.error = => @discussionAlert(gettext("Sorry"), errorMsg)
+    undo = _.pick(model.attributes, _.keys(updates))
+    model.set(updates)
+    @safeAjax(safeAjaxParams).fail(() -> model.set(undo))
+
   @bindLocalEvents: ($local, eventsHandler) ->
     for eventSelector, handler of eventsHandler
       [event, selector] = eventSelector.split(' ')
@@ -166,7 +176,7 @@ class @DiscussionUtil
   @formErrorHandler: (errorsField) ->
     (xhr, textStatus, error) ->
       makeErrorElem = (message) ->
-        $("<li>").addClass("new-post-form-error").html(message)
+        $("<li>").addClass("post-error").html(message)
       errorsField.empty().show()
       if xhr.status == 400
         response = JSON.parse(xhr.responseText)
@@ -307,6 +317,16 @@ class @DiscussionUtil
       while minLength < text.length && text[minLength] != ' '
         minLength++
       return text.substr(0, minLength) + gettext('…')
+
+  @abbreviateHTML: (html, minLength) ->
+    # Abbreviates the html to at least minLength characters, stopping at word boundaries
+    truncated_text = jQuery.truncate(html, {length: minLength, noBreaks: true, ellipsis: gettext('…')})
+    $result = $("<div>" + truncated_text + "</div>")
+    imagesToReplace = $result.find("img:not(:first)")
+    if imagesToReplace.length > 0
+        $result.append("<p><em>Some images in this post have been omitted</em></p>")
+    imagesToReplace.replaceWith("<em>image omitted</em>")
+    $result.html()
 
   @getPaginationParams: (curPage, numPages, pageUrlFunc) =>
     delta = 2

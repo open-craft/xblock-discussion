@@ -5,9 +5,10 @@ if Backbone?
     initialize: (models, options={})->
       @pages = options['pages'] || 1
       @current_page = 1
+      @sort_preference = options['sort']
       @bind "add", (item) =>
         item.discussion = @
-      @comparator = @sortByDateRecentFirst
+      @setSortComparator(@sort_preference)
       @on "thread:remove", (thread) =>
         @remove(thread)
 
@@ -16,6 +17,12 @@ if Backbone?
 
     hasMorePages: ->
       @current_page < @pages
+
+    setSortComparator: (sortBy) ->
+      switch sortBy
+        when 'date' then @comparator = @sortByDateRecentFirst
+        when 'votes' then @comparator = @sortByVotes
+        when 'comments' then @comparator = @sortByComments
 
     addThread: (thread, options) ->
       # TODO: Check for existing thread with same ID in a faster way
@@ -27,6 +34,8 @@ if Backbone?
 
     retrieveAnotherPage: (mode, options={}, sort_options={}, error=null)->
       data = { page: @current_page + 1 }
+      if _.contains(["unread", "unanswered", "flagged"], options.filter)
+        data[options.filter] = true
       switch mode
         when 'search'
           url = DiscussionUtil.urlFor 'search'
@@ -36,9 +45,6 @@ if Backbone?
           data['commentable_ids'] = options.commentable_ids
         when 'all'
           url = DiscussionUtil.urlFor 'threads'
-        when 'flagged'
-          data['flagged'] = true
-          url = DiscussionUtil.urlFor 'search'
         when 'followed'
           url = DiscussionUtil.urlFor 'followed_threads', options.user_id
       if options['group_id']
@@ -55,9 +61,9 @@ if Backbone?
           new_threads = [new Thread(data) for data in response.discussion_data][0]
           new_collection = _.union(models, new_threads)
           Content.loadContentInfos(response.annotated_content_info)
-          @reset new_collection
           @pages = response.num_pages
           @current_page = response.page
+          @reset new_collection
         error: error
 
     sortByDate: (thread) ->

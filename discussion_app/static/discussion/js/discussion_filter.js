@@ -5,29 +5,27 @@
 
     DiscussionFilter.filterDrop = function(e) {
       var $drop, $items, query;
-      $drop = $(e.target).parents('.topic_menu_wrapper, .browse-topic-drop-menu-wrapper');
+      $drop = $(e.target).parents('.topic-menu-wrapper');
       query = $(e.target).val();
-      $items = $drop.find('a');
+      $items = $drop.find('.topic-menu-item');
       if (query.length === 0) {
         $items.removeClass('hidden');
         return;
       }
       $items.addClass('hidden');
       return $items.each(function(i) {
-        var terms, test, thisText;
-        thisText = $(this).not('.unread').text();
-        $(this).parents('ul').siblings('a').not('.unread').each(function(i) {
-          return thisText = thisText + ' ' + $(this).text();
-        });
-        test = true;
-        terms = thisText.split(' ');
-        if (thisText.toLowerCase().search(query.toLowerCase()) === -1) {
-          test = false;
-        }
-        if (test) {
+        var path, pathText, pathTitles;
+        path = $(this).parents(".topic-menu-item").andSelf();
+        pathTitles = path.children(".topic-title").map(function(i, elem) {
+          return $(elem).text();
+        }).get();
+        pathText = pathTitles.join(" / ").toLowerCase();
+        if (query.split(" ").every(function(term) {
+          return pathText.search(term.toLowerCase()) !== -1;
+        })) {
           $(this).removeClass('hidden');
-          $(this).parent().find('a').removeClass('hidden');
-          return $(this).parents('ul').siblings('a').removeClass('hidden');
+          $(this).find('.topic-menu-item').removeClass('hidden');
+          return $(this).parents('.topic-menu-item').removeClass('hidden');
         }
       });
     };

@@ -18,7 +18,8 @@
         this.edit = __bind(this.edit, this);
         this.endorseThread = __bind(this.endorseThread, this);
         this.addComment = __bind(this.addComment, this);
-        this.renderResponse = __bind(this.renderResponse, this);
+        this.renderAddResponseButton = __bind(this.renderAddResponseButton, this);
+        this.renderResponseToList = __bind(this.renderResponseToList, this);
         this.renderResponseCountAndPagination = __bind(this.renderResponseCountAndPagination, this);
         _ref = DiscussionThreadView.__super__.constructor.apply(this, arguments);
         return _ref;
@@ -30,17 +31,32 @@
 
       DiscussionThreadView.prototype.events = {
         "click .discussion-submit-post": "submitComment",
-        "click .add-response-btn": "scrollToAddResponse"
+        "click .add-response-btn": "scrollToAddResponse",
+        "click .forum-thread-expand": "expand",
+        "click .forum-thread-collapse": "collapse"
       };
 
       DiscussionThreadView.prototype.$ = function(selector) {
         return this.$el.find(selector);
       };
 
-      DiscussionThreadView.prototype.initialize = function() {
+      DiscussionThreadView.prototype.isQuestion = function() {
+        return this.model.get("thread_type") === "question";
+      };
+
+      DiscussionThreadView.prototype.initialize = function(options) {
+        var _ref1;
         DiscussionThreadView.__super__.initialize.call(this);
+        this.mode = options.mode || "inline";
+        if ((_ref1 = this.mode) !== "tab" && _ref1 !== "inline") {
+          throw new Error("invalid mode: " + this.mode);
+        }
         this.createShowView();
-        return this.responses = new Comments();
+        this.responses = new Comments();
+        this.loadedResponses = false;
+        if (this.isQuestion()) {
+          return this.markedAnswers = new Comments();
+        }
       };
 
       DiscussionThreadView.prototype.renderTemplate = function() {
@@ -51,18 +67,76 @@
       DiscussionThreadView.prototype.render = function() {
         var _this = this;
         this.$el.html(this.renderTemplate());
-        this.initLocal();
         this.delegateEvents();
         this.renderShowView();
         this.renderAttrs();
         this.$("span.timeago").timeago();
         this.makeWmdEditor("reply-body");
         this.renderAddResponseButton();
-        this.responses.on("add", this.renderResponse);
-        setTimeout((function() {
-          return _this.loadInitialResponses();
-        }), 100);
-        return this;
+        this.responses.on("add", function(response) {
+          return _this.renderResponseToList(response, ".js-response-list", {});
+        });
+        if (this.isQuestion()) {
+          this.markedAnswers.on("add", function(response) {
+            return _this.renderResponseToList(response, ".js-marked-answer-list", {
+              collapseComments: true
+            });
+          });
+        }
+        if (this.mode === "tab") {
+          setTimeout((function() {
+            return _this.loadInitialResponses();
+          }), 100);
+          return this.$(".post-tools").hide();
+        } else {
+          return this.collapse();
+        }
+      };
+
+      DiscussionThreadView.prototype.attrRenderer = $.extend({}, DiscussionContentView.prototype.attrRenderer, {
+        closed: function(closed) {
+          this.$(".discussion-reply-new").toggle(!closed);
+          return this.renderAddResponseButton();
+        }
+      });
+
+      DiscussionThreadView.prototype.expand = function(event) {
+        if (event) {
+          event.preventDefault();
+        }
+        this.$el.addClass("expanded");
+        this.$el.find(".post-body").text(this.model.get("body"));
+        this.showView.convertMath();
+        this.$el.find(".forum-thread-expand").hide();
+        this.$el.find(".forum-thread-collapse").show();
+        this.$el.find(".post-extended-content").show();
+        if (!this.loadedResponses) {
+          return this.loadInitialResponses();
+        }
+      };
+
+      DiscussionThreadView.prototype.collapse = function(event) {
+        if (event) {
+          event.preventDefault();
+        }
+        this.$el.removeClass("expanded");
+        this.$el.find(".post-body").text(this.getAbbreviatedBody());
+        this.showView.convertMath();
+        this.$el.find(".forum-thread-expand").show();
+        this.$el.find(".forum-thread-collapse").hide();
+        return this.$el.find(".post-extended-content").hide();
+      };
+
+      DiscussionThreadView.prototype.getAbbreviatedBody = function() {
+        var abbreviated, cached;
+        cached = this.model.get("abbreviatedBody");
+        if (cached) {
+          return cached;
+        } else {
+          abbreviated = DiscussionUtil.abbreviateString(this.model.get("body"), 140);
+          this.model.set("abbreviatedBody", abbreviated);
+          return abbreviated;
+        }
       };
 
       DiscussionThreadView.prototype.cleanup = function() {
@@ -87,9 +161,13 @@
           },
           success: function(data, textStatus, xhr) {
             Content.loadContentInfos(data['annotated_content_info']);
-            _this.responses.add(data['content']['children']);
-            _this.renderResponseCountAndPagination(data['content']['resp_total']);
-            return _this.trigger("thread:responses:rendered");
+            if (_this.isQuestion()) {
+              _this.markedAnswers.add(data["content"]["endorsed_responses"]);
+            }
+            _this.responses.add(_this.isQuestion() ? data["content"]["non_endorsed_responses"] : data["content"]["children"]);
+            _this.renderResponseCountAndPagination(_this.isQuestion() ? data["content"]["non_endorsed_resp_total"] : data["content"]["resp_total"]);
+            _this.trigger("thread:responses:rendered");
+            return _this.loadedResponses = true;
           },
           error: function(xhr) {
             if (xhr.status === 404) {
@@ -104,13 +182,18 @@
       };
 
       DiscussionThreadView.prototype.loadInitialResponses = function() {
-        return this.loadResponses(INITIAL_RESPONSE_PAGE_SIZE, this.$el.find(".responses"), true);
+        return this.loadResponses(INITIAL_RESPONSE_PAGE_SIZE, this.$el.find(".js-response-list"), true);
       };
 
       DiscussionThreadView.prototype.renderResponseCountAndPagination = function(responseTotal) {
-        var buttonText, loadMoreButton, responseLimit, responsePagination, responsesRemaining, showingResponsesText,
+        var buttonText, loadMoreButton, responseCountFormat, responseLimit, responsePagination, responsesRemaining, showingResponsesText,
           _this = this;
-        this.$el.find(".response-count").html(interpolate(ngettext("%(numResponses)s response", "%(numResponses)s responses", responseTotal), {
+        if (this.isQuestion() && this.markedAnswers.length !== 0) {
+          responseCountFormat = ngettext("%(numResponses)s other response", "%(numResponses)s other responses", responseTotal);
+        } else {
+          responseCountFormat = ngettext("%(numResponses)s response", "%(numResponses)s responses", responseTotal);
+        }
+        this.$el.find(".response-count").html(interpolate(responseCountFormat, {
           numResponses: responseTotal
         }, true));
         responsePagination = this.$el.find(".response-pagination");
@@ -140,21 +223,21 @@
         }
       };
 
-      DiscussionThreadView.prototype.renderResponse = function(response) {
+      DiscussionThreadView.prototype.renderResponseToList = function(response, listSelector, options) {
         var view;
         response.set('thread', this.model);
-        view = new ThreadResponseView({
+        view = new ThreadResponseView($.extend({
           model: response
-        });
+        }, options));
         view.on("comment:add", this.addComment);
         view.on("comment:endorse", this.endorseThread);
         view.render();
-        this.$el.find(".responses").append(view.el);
+        this.$el.find(listSelector).append(view.el);
         return view.afterInsert();
       };
 
       DiscussionThreadView.prototype.renderAddResponseButton = function() {
-        if (this.model.hasResponses() && this.model.can('can_reply')) {
+        if (this.model.hasResponses() && this.model.can('can_reply') && !this.model.get('closed')) {
           return this.$el.find('div.add-response').show();
         } else {
           return this.$el.find('div.add-response').hide();
@@ -173,10 +256,8 @@
         return this.model.comment();
       };
 
-      DiscussionThreadView.prototype.endorseThread = function(endorsed) {
-        var is_endorsed;
-        is_endorsed = this.$el.find(".is-endorsed").length;
-        return this.model.set('endorsed', is_endorsed);
+      DiscussionThreadView.prototype.endorseThread = function() {
+        return this.model.set('endorsed', this.$el.find(".action-answer.is-checked").length > 0);
       };
 
       DiscussionThreadView.prototype.submitComment = function(event) {
@@ -201,7 +282,7 @@
           user_id: window.user.get("id")
         });
         comment.set('thread', this.model.get('thread'));
-        this.renderResponse(comment);
+        this.renderResponseToList(comment, ".js-response-list");
         this.model.addComment();
         this.renderAddResponseButton();
         return DiscussionUtil.safeAjax({
@@ -236,7 +317,7 @@
           url: url,
           type: "POST",
           dataType: 'json',
-          async: true,
+          async: false,
           data: {
             title: newTitle,
             body: newBody
@@ -250,6 +331,7 @@
               title: newTitle,
               body: newBody
             });
+            _this.model.unset("abbreviatedBody");
             _this.createShowView();
             return _this.renderShowView();
           }
@@ -279,20 +361,15 @@
         return this.renderSubView(this.editView);
       };
 
-      DiscussionThreadView.prototype.getShowViewClass = function() {
-        return DiscussionThreadShowView;
-      };
-
       DiscussionThreadView.prototype.createShowView = function() {
-        var showViewClass;
         if (this.editView != null) {
           this.editView.undelegateEvents();
           this.editView.$el.empty();
           this.editView = null;
         }
-        showViewClass = this.getShowViewClass();
-        this.showView = new showViewClass({
-          model: this.model
+        this.showView = new DiscussionThreadShowView({
+          model: this.model,
+          mode: this.mode
         });
         this.showView.bind("thread:_delete", this._delete);
         return this.showView.bind("thread:edit", this.edit);

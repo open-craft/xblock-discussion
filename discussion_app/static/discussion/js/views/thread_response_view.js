@@ -21,6 +21,8 @@
 
       ThreadResponseView.prototype.tagName = "li";
 
+      ThreadResponseView.prototype.className = "forum-response";
+
       ThreadResponseView.prototype.events = {
         "click .discussion-submit-comment": "submitComment",
         "focus .wmd-input": "showEditorChrome"
@@ -30,7 +32,8 @@
         return this.$el.find(selector);
       };
 
-      ThreadResponseView.prototype.initialize = function() {
+      ThreadResponseView.prototype.initialize = function(options) {
+        this.collapseComments = options.collapseComments;
         return this.createShowView();
       };
 
@@ -95,9 +98,19 @@
           });
         };
         this.model.get('comments').each(collectComments);
-        return comments.each(function(comment) {
+        comments.each(function(comment) {
           return _this.renderComment(comment, false, null);
         });
+        if (this.collapseComments && comments.length) {
+          this.$(".comments").hide();
+          return this.$(".action-show-comments").on("click", function(event) {
+            event.preventDefault();
+            _this.$(".action-show-comments").hide();
+            return _this.$(".comments").show();
+          });
+        } else {
+          return this.$(".action-show-comments").hide();
+        }
       };
 
       ThreadResponseView.prototype.renderComment = function(comment) {
@@ -219,6 +232,7 @@
       };
 
       ThreadResponseView.prototype.createShowView = function() {
+        var _this = this;
         if (this.editView != null) {
           this.editView.undelegateEvents();
           this.editView.$el.empty();
@@ -228,7 +242,10 @@
           model: this.model
         });
         this.showView.bind("response:_delete", this._delete);
-        return this.showView.bind("response:edit", this.edit);
+        this.showView.bind("response:edit", this.edit);
+        return this.showView.on("comment:endorse", function() {
+          return _this.trigger("comment:endorse");
+        });
       };
 
       ThreadResponseView.prototype.renderShowView = function() {
@@ -260,7 +277,7 @@
           url: url,
           type: "POST",
           dataType: 'json',
-          async: true,
+          async: false,
           data: {
             body: newBody
           },

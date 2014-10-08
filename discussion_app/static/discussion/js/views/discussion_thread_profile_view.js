@@ -14,11 +14,10 @@
       }
 
       DiscussionThreadProfileView.prototype.render = function() {
-        var params;
+        var element, params;
         this.template = DiscussionUtil.getTemplate("_profile_thread");
-        if (!this.model.has('abbreviatedBody')) {
-          this.abbreviateBody();
-        }
+        this.convertMath();
+        this.abbreviateBody();
         params = $.extend(this.model.toJSON(), {
           permalink: this.model.urlFor('retrieve')
         });
@@ -32,20 +31,18 @@
         }
         this.$el.html(Mustache.render(this.template, params));
         this.$("span.timeago").timeago();
-        this.convertMath();
+        element = this.$(".post-body");
+        MathJax.Hub.Queue(["Typeset", MathJax.Hub, element[0]]);
         return this;
       };
 
       DiscussionThreadProfileView.prototype.convertMath = function() {
-        var element;
-        element = this.$(".post-body");
-        element.html(DiscussionUtil.postMathJaxProcessor(DiscussionUtil.markdownWithHighlight(element.text())));
-        return MathJax.Hub.Queue(["Typeset", MathJax.Hub, element[0]]);
+        return this.model.set('markdownBody', DiscussionUtil.postMathJaxProcessor(DiscussionUtil.markdownWithHighlight(this.model.get('body'))));
       };
 
       DiscussionThreadProfileView.prototype.abbreviateBody = function() {
         var abbreviated;
-        abbreviated = DiscussionUtil.abbreviateString(this.model.get('body'), 140);
+        abbreviated = DiscussionUtil.abbreviateHTML(this.model.get('markdownBody'), 140);
         return this.model.set('abbreviatedBody', abbreviated);
       };
 
